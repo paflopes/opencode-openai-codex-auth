@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { log } from "../logger.js";
 import type { CacheMetadata, GitHubRelease } from "../types.js";
 
 const GITHUB_API_RELEASES =
@@ -197,24 +198,16 @@ export async function getCodexInstructions(
 
 		throw new Error(`HTTP ${response.status}`);
 	} catch (error) {
-		const err = error as Error;
-		console.error(
-			`[openai-codex-plugin] Failed to fetch ${modelFamily} instructions from GitHub:`,
-			err.message,
-		);
+		log("error", `Failed to fetch ${modelFamily} instructions from GitHub`, { error });
 
 		// Try to use cached version even if stale
 		if (existsSync(cacheFile)) {
-			console.error(
-				`[openai-codex-plugin] Using cached ${modelFamily} instructions`,
-			);
+			log("warn", `Using cached ${modelFamily} instructions`);
 			return readFileSync(cacheFile, "utf8");
 		}
 
 		// Fall back to bundled version (use codex-instructions.md as default)
-		console.error(
-			`[openai-codex-plugin] Falling back to bundled instructions for ${modelFamily}`,
-		);
+		log("warn", `Falling back to bundled instructions for ${modelFamily}`);
 		return readFileSync(join(__dirname, "codex-instructions.md"), "utf8");
 	}
 }

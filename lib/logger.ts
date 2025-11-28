@@ -6,13 +6,52 @@ import { homedir } from "node:os";
 export const LOGGING_ENABLED = process.env.ENABLE_PLUGIN_REQUEST_LOGGING === "1";
 export const DEBUG_ENABLED = process.env.DEBUG_CODEX_PLUGIN === "1" || LOGGING_ENABLED;
 const LOG_DIR = join(homedir(), ".opencode", "logs", "codex-plugin");
+const LOG_FILE = join(LOG_DIR, "plugin.log");
+
+type LogLevel = "info" | "warn" | "error" | "debug";
+
+function ensureLogDir(): void {
+	if (!existsSync(LOG_DIR)) {
+		mkdirSync(LOG_DIR, { recursive: true });
+	}
+}
+
+function shouldLog(level: LogLevel): boolean {
+	if (level === "debug") return DEBUG_ENABLED;
+	if (level === "info") return LOGGING_ENABLED || DEBUG_ENABLED;
+	return true;
+}
+
+/**
+ * General log writer that persists logs to file.
+ * @param level - Log level
+ * @param message - Log message
+ * @param data - Optional data to log
+ */
+export function log(level: LogLevel, message: string, data?: unknown): void {
+	if (!shouldLog(level)) return;
+
+	try {
+		ensureLogDir();
+		const entry = {
+			timestamp: new Date().toISOString(),
+			level,
+			message,
+			...(data !== undefined ? { data: normalizeForLogging(data) } : {}),
+		};
+
+		writeFileSync(LOG_FILE, `${JSON.stringify(entry)}\n`, { flag: "a", encoding: "utf8" });
+	} catch {
+		// Intentionally swallow logging errors to avoid side effects
+	}
+}
 
 // Log startup message about logging state
 if (LOGGING_ENABLED) {
-	console.log("[openai-codex-plugin] Request logging ENABLED - logs will be saved to:", LOG_DIR);
+	log("info", "Request logging ENABLED", { logDir: LOG_DIR });
 }
 if (DEBUG_ENABLED && !LOGGING_ENABLED) {
-	console.log("[openai-codex-plugin] Debug logging ENABLED");
+	log("info", "Debug logging ENABLED");
 }
 
 let requestCounter = 0;
@@ -27,9 +66,7 @@ export function logRequest(stage: string, data: Record<string, unknown>): void {
 	if (!LOGGING_ENABLED) return;
 
 	// Ensure log directory exists on first log
-	if (!existsSync(LOG_DIR)) {
-		mkdirSync(LOG_DIR, { recursive: true });
-	}
+	ensureLogDir();
 
 	const timestamp = new Date().toISOString();
 	const requestId = ++requestCounter;
@@ -50,10 +87,9 @@ export function logRequest(stage: string, data: Record<string, unknown>): void {
 			),
 			"utf8",
 		);
-		console.log(`[openai-codex-plugin] Logged ${stage} to ${filename}`);
+		log("info", `Logged ${stage}`, { filename });
 	} catch (e) {
-		const error = e as Error;
-		console.error("[openai-codex-plugin] Failed to write log:", error.message);
+		log("error", `Failed to write log for ${stage}`, { filename, error: e });
 	}
 }
 
@@ -65,11 +101,7 @@ export function logRequest(stage: string, data: Record<string, unknown>): void {
 export function logDebug(message: string, data?: unknown): void {
 	if (!DEBUG_ENABLED) return;
 
-	if (data !== undefined) {
-		console.log(`[openai-codex-plugin] ${message}`, data);
-	} else {
-		console.log(`[openai-codex-plugin] ${message}`);
-	}
+	log("debug", message, data);
 }
 
 /**
@@ -78,9 +110,45 @@ export function logDebug(message: string, data?: unknown): void {
  * @param data - Optional data to log
  */
 export function logWarn(message: string, data?: unknown): void {
-	if (data !== undefined) {
-		console.warn(`[openai-codex-plugin] ${message}`, data);
-	} else {
-		console.warn(`[openai-codex-plugin] ${message}`);
-	}
+	log("warn", message, data);
+}
+
+function normalizeForLogging(value: unknown, seen = new WeakSet<object>()): unknown {
+    if (value instanceof Error) {
+        return {
+            name: value.name,
+            message: value.message,
+            stack: value.stack,
+            cause:
+                value.cause && typeof value.cause !== "string"
+                    ? normalizeForLogging(value.cause, seen)
+                    : value.cause ?? undefined,
+        };
+    }
+
+    if (value === null || value === undefined) return value;
+
+    const type = typeof value;
+    if (type === "string" || type === "number" || type === "boolean") {
+        return value;
+    }
+    if (type === "bigint" || type === "symbol" || type === "function") {
+        return String(value);
+    }
+
+    if (type === "object") {
+        const obj = value as Record<string, unknown>;
+        if (seen.has(obj)) return "[Circular]";
+        seen.add(obj);
+        if (Array.isArray(obj)) {
+            return obj.map((item) => normalizeForLogging(item, seen));
+        }
+        const normalized: Record<string, unknown> = {};
+        for (const [key, val] of Object.entries(obj)) {
+            normalized[key] = normalizeForLogging(val, seen);
+        }
+        return normalized;
+    }
+
+    return String(value);
 }

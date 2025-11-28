@@ -6,7 +6,7 @@
 import type { Auth } from "@opencode-ai/sdk";
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import { refreshAccessToken } from "../auth/auth.js";
-import { logRequest } from "../logger.js";
+import { logRequest, log } from "../logger.js";
 import { getCodexInstructions, getModelFamily } from "../prompts/codex.js";
 import { transformRequestBody, normalizeModel } from "./request-transformer.js";
 import { convertSseToJson, ensureContentType } from "./response-handler.js";
@@ -46,7 +46,7 @@ export async function refreshAndUpdateToken(
 	const refreshResult = await refreshAccessToken(refreshToken);
 
 	if (refreshResult.type === "failed") {
-		console.error(`[${PLUGIN_NAME}] ${ERROR_MESSAGES.TOKEN_REFRESH_FAILED}`);
+		log('error', `[${PLUGIN_NAME}] ${ERROR_MESSAGES.TOKEN_REFRESH_FAILED}`);
 		return {
 			success: false,
 			response: new Response(
@@ -167,7 +167,7 @@ export async function transformRequestForCodex(
 			updatedInit: { ...init, body: JSON.stringify(transformedBody) },
 		};
 	} catch (e) {
-		console.error(`[${PLUGIN_NAME}] ${ERROR_MESSAGES.REQUEST_PARSE_ERROR}:`, e);
+        log("error", `[${PLUGIN_NAME}] ${ERROR_MESSAGES.REQUEST_PARSE_ERROR}`, { error: e });
 		return undefined;
 	}
 }
@@ -262,7 +262,7 @@ export async function handleErrorResponse(
 		enriched = raw;
 	}
 
-    console.error(`[${PLUGIN_NAME}] ${response.status} error:`, enriched);
+	log("error", `[${PLUGIN_NAME}] ${response.status} error`, { error: enriched });
 	logRequest(LOG_STAGES.ERROR_RESPONSE, {
 		status: response.status,
 		error: enriched,
